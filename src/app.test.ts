@@ -493,3 +493,53 @@ describe("POST /notifications/read-all", () => {
     expect(res.statusCode).toBe(200);
   });
 });
+
+describe("POST /admin/notifications", () => {
+  it("403s a non-admin caller", async () => {
+    const { app } = setup();
+    const res = await app.inject({
+      method: "POST",
+      url: "/admin/notifications",
+      headers: { "x-user-id": USER_A },
+      payload: { userId: USER_B, title: "Hello" },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("400s a missing userId", async () => {
+    const { app } = setup();
+    const res = await app.inject({
+      method: "POST",
+      url: "/admin/notifications",
+      headers: { "x-user-id": "admin", "x-user-role": "admin" },
+      payload: { title: "Hello" },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("400s a missing title", async () => {
+    const { app } = setup();
+    const res = await app.inject({
+      method: "POST",
+      url: "/admin/notifications",
+      headers: { "x-user-id": "admin", "x-user-role": "admin" },
+      payload: { userId: USER_B },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("sends a custom notification to the given user", async () => {
+    const { app } = setup();
+    const res = await app.inject({
+      method: "POST",
+      url: "/admin/notifications",
+      headers: { "x-user-id": "admin", "x-user-role": "admin" },
+      payload: { userId: USER_B, title: "Important update", body: "Please read this." },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toMatchObject({ userId: USER_B, type: "admin_message", title: "Important update" });
+
+    const list = await app.inject({ method: "GET", url: "/notifications", headers: { "x-user-id": USER_B } });
+    expect(list.json()).toHaveLength(1);
+  });
+});

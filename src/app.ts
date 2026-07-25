@@ -35,6 +35,12 @@ interface ListNotificationsQuery {
   limit?: string;
 }
 
+interface AdminSendNotificationBody {
+  userId?: string;
+  title?: string;
+  body?: string;
+}
+
 export function buildApp(
   notificationRepository: NotificationRepository = new InMemoryNotificationRepository(),
   internalServiceToken: string | undefined = process.env.INTERNAL_SERVICE_TOKEN,
@@ -164,6 +170,38 @@ export function buildApp(
     const callerUserId = requireUserId(request);
     const markedCount = await notificationRepository.markAllReadForUser(callerUserId);
     return reply.send({ markedCount });
+  });
+
+  // admin dashboard: send an arbitrary message to any user, not tied to a real event elsewhere
+  // in the system -- referenceType "admin" / referenceId the admin message's own id marks it as
+  // such, distinct from every other notification type here which always references a real
+  // booking/payment/doubt/etc.
+  app.post<{ Body: AdminSendNotificationBody }>("/admin/notifications", async (request, reply) => {
+    if (request.headers["x-user-role"] !== "admin") {
+      return reply.code(403).send({ error: "admin access required" });
+    }
+
+    const { userId, title, body } = request.body ?? {};
+    if (!isUuidLike(userId)) {
+      return reply.code(400).send({ error: "userId must be a valid uuid" });
+    }
+    if (!isNonEmptyString(title)) {
+      return reply.code(400).send({ error: "title is required" });
+    }
+    if (body !== undefined && typeof body !== "string") {
+      return reply.code(400).send({ error: "body must be a string" });
+    }
+
+    const created = await notificationRepository.create({
+      userId,
+      type: "admin_message",
+      referenceType: "admin",
+      referenceId: userId,
+      title,
+      body,
+    });
+    request.log.info({ notificationId: created.id, userId }, "admin notification sent");
+    return reply.code(201).send(created);
   });
 
   return app;
