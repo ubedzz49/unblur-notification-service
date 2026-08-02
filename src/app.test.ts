@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildApp } from "./app.js";
 import { InMemoryNotificationRepository } from "./notification/repository.js";
+import { FakeAuditLogClient } from "./admin/audit-log-client.js";
 
 const INTERNAL_TOKEN = "test-internal-token";
 const USER_A = "11111111-1111-1111-1111-111111111111";
@@ -9,8 +10,9 @@ const REFERENCE_ID = "33333333-3333-3333-3333-333333333333";
 
 function setup() {
   const repo = new InMemoryNotificationRepository();
-  const app = buildApp(repo, INTERNAL_TOKEN);
-  return { app, repo };
+  const auditLogClient = new FakeAuditLogClient();
+  const app = buildApp(repo, INTERNAL_TOKEN, auditLogClient);
+  return { app, repo, auditLogClient };
 }
 
 const validCreateBody = (overrides: Record<string, unknown> = {}) => ({
@@ -528,12 +530,12 @@ describe("POST /admin/notifications", () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it("sends a custom notification to the given user", async () => {
-    const { app } = setup();
+  it("sends a custom notification to the given user and records an audit entry", async () => {
+    const { app, auditLogClient } = setup();
     const res = await app.inject({
       method: "POST",
       url: "/admin/notifications",
-      headers: { "x-user-id": "admin", "x-user-role": "admin" },
+      headers: { "x-user-id": "admin", "x-user-role": "admin", "x-user-username": "boss" },
       payload: { userId: USER_B, title: "Important update", body: "Please read this." },
     });
     expect(res.statusCode).toBe(201);
@@ -541,6 +543,19 @@ describe("POST /admin/notifications", () => {
 
     const list = await app.inject({ method: "GET", url: "/notifications", headers: { "x-user-id": USER_B } });
     expect(list.json()).toHaveLength(1);
+    expect(auditLogClient.calls).toHaveLength(1);
+    expect(auditLogClient.calls[0]).toMatchObject({ action: "send_admin_notification", adminUsername: "boss", targetId: USER_B });
+  });
+
+  it("allows a superadmin caller, not just admin", async () => {
+    const { app } = setup();
+    const res = await app.inject({
+      method: "POST",
+      url: "/admin/notifications",
+      headers: { "x-user-id": "super-1", "x-user-role": "superadmin" },
+      payload: { userId: USER_B, title: "Hello" },
+    });
+    expect(res.statusCode).toBe(201);
   });
 });
 

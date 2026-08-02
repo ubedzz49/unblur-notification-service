@@ -5,6 +5,7 @@ import {
   InMemoryNotificationRepository,
   NotificationRepository,
 } from "./notification/repository.js";
+import { AuditLogClient, FakeAuditLogClient } from "./admin/audit-log-client.js";
 
 const DEFAULT_LIMIT = 20;
 const MIN_LIMIT = 1;
@@ -45,6 +46,7 @@ interface AdminSendNotificationBody {
 export function buildApp(
   notificationRepository: NotificationRepository = new InMemoryNotificationRepository(),
   internalServiceToken: string | undefined = process.env.INTERNAL_SERVICE_TOKEN,
+  auditLogClient: AuditLogClient = new FakeAuditLogClient(),
 ): FastifyInstance {
   const app = Fastify(
     process.env.NODE_ENV === "test"
@@ -199,7 +201,8 @@ export function buildApp(
   // such, distinct from every other notification type here which always references a real
   // booking/payment/doubt/etc.
   app.post<{ Body: AdminSendNotificationBody }>("/admin/notifications", async (request, reply) => {
-    if (request.headers["x-user-role"] !== "admin") {
+    const role = request.headers["x-user-role"];
+    if (role !== "admin" && role !== "superadmin") {
       return reply.code(403).send({ error: "admin access required" });
     }
 
@@ -221,6 +224,14 @@ export function buildApp(
       referenceId: userId,
       title,
       body,
+    });
+    await auditLogClient.record({
+      adminUserId: (request.headers["x-user-id"] as string) ?? "unknown",
+      adminUsername: (request.headers["x-user-username"] as string) ?? "unknown",
+      action: "send_admin_notification",
+      targetType: "user",
+      targetId: userId,
+      metadata: { title },
     });
     request.log.info({ notificationId: created.id, userId }, "admin notification sent");
     return reply.code(201).send(created);
