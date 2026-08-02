@@ -2,6 +2,7 @@ import { buildApp } from "./app.js";
 import { buildDbPool } from "./db/pool.js";
 import { runMigrations } from "./db/migrate.js";
 import { PostgresNotificationRepository } from "./notification/postgres-repository.js";
+import { HttpAuditLogClient } from "./admin/audit-log-client.js";
 import { logger } from "./logger.js";
 
 const port = Number(process.env.PORT ?? 3008);
@@ -18,7 +19,7 @@ const dbPool = buildDbPool();
 
 runMigrations(dbPool)
   .then(() => {
-    const app = buildApp(new PostgresNotificationRepository(dbPool));
+    const app = buildApp(new PostgresNotificationRepository(dbPool), process.env.INTERNAL_SERVICE_TOKEN, new HttpAuditLogClient());
     return app.listen({ port, host: "0.0.0.0" }).then(() => app.log.info({ port }, "notification-service listening"));
   })
   .catch((err) => {
